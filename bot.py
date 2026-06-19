@@ -12,8 +12,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 logging.basicConfig(level=logging.INFO)
 
 # ===== ДАННЫЕ =====
-BOT_TOKEN = "8438014649:AAEFB_42u6_mAq1uViWmxPUkOi9AIgBVIYk"
-GROUP_ID = -5296812258 
+BOT_TOKEN = "8772261504:AAGWKUwnsLR2bWXEZK9mL9PH9UA0NVz-keQ"
+GROUP_ID = -5223331104
 # ==================
 
 # Настройка бота
