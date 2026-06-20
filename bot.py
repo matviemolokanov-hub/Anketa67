@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 # ===== ДАННЫЕ =====
 BOT_TOKEN = "8772261504:AAGWKUwnsLR2bWXEZK9mL9PH9UA0NVz-keQ"
-GROUP_ID = -5296812258 
+GROUP_ID = -5223331104
 # ==================
 
 # Настройка бота
