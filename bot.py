@@ -12,8 +12,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 logging.basicConfig(level=logging.INFO)
 
 # ===== ДАННЫЕ =====
-BOT_TOKEN = "8772261504:AAGWKUwnsLR2bWXEZK9mL9PH9UA0NVz-keQ"
-GROUP_ID = -5223331104
+BOT_TOKEN = "8438014649:AAEFB_42u6_mAq1uViWmxPUkOi9AIgBVIYk"
+GROUP_ID = -5296812258 
 # ==================
 
 # Настройка бота
@@ -27,6 +27,7 @@ class Form(StatesGroup):
     waiting_for_device = State()
     waiting_for_discord = State()
     waiting_for_roblox = State()
+    waiting_for_farm_amount = State() # Новый этап
     waiting_for_proof = State()
 
 # --- Клавиатуры ---
@@ -83,10 +84,16 @@ async def process_discord(call: CallbackQuery, state: FSMContext):
 @dp.message(Form.waiting_for_roblox)
 async def process_roblox(message: Message, state: FSMContext):
     await state.update_data(roblox=message.text)
+    await message.answer("📈 <b>Вопрос 5: Сколько в день вы фармите моркови?</b>")
+    await state.set_state(Form.waiting_for_farm_amount)
+
+@dp.message(Form.waiting_for_farm_amount)
+async def process_farm(message: Message, state: FSMContext):
+    await state.update_data(farm=message.text)
     
     proof_text = (
         "📸 <b>ФИНАЛЬНЫЙ ЭТАП: ПОДТВЕРЖДЕНИЕ</b>\n\n"
-        "Зайдите в игру и сделайте скриншот, чтобы доказать, <b>сколько у вас моркови</b>.\n\n"
+        "1. Зайдите в игру и сделайте скрин, чтобы доказать, сколько у вас моркови.\n\n"
         "👉 <b>Пришлите своё фото в ответ на это сообщение:</b>"
     )
     await message.answer(proof_text)
@@ -102,7 +109,8 @@ async def handle_proof(message: Message, state: FSMContext):
                f"👤 <b>Имя:</b> {message.from_user.full_name}\n"
                f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n"
                f"🔗 <b>Юзер:</b> {username}\n"
-               f"🥕 <b>Морковь:</b> {data.get('carrots')}\n"
+               f"🥕 <b>Морковь (сейчас):</b> {data.get('carrots')}\n"
+               f"📈 <b>Морковь (фарм в день):</b> {data.get('farm')}\n"
                f"📱 <b>Устройство:</b> {data.get('device')}\n"
                f"🎮 <b>Discord:</b> {data.get('discord')}\n"
                f"🕹️ <b>Roblox:</b> {data.get('roblox')}\n\n"
@@ -110,7 +118,12 @@ async def handle_proof(message: Message, state: FSMContext):
     
     try:
         await bot.send_photo(GROUP_ID, photo=file_id, caption=caption, reply_markup=get_moderation_keyboard(message.from_user.id))
-        await message.answer("✅ <b>Анкета успешно отправлена!</b>\nОжидай решения администрации.")
+        await message.answer(
+            "✅ <b>Анкета успешно отправлена!</b>\nОжидай решения администрации.\n\n"
+            "🔗 <b>Наши паблики:</b>\n"
+            "Telegram: <a href='https://t.me/piskaguild'>https://t.me/piskaguild</a>\n"
+            "Discord: <a href='https://discord.gg/WM7eEPDkc'>https://discord.gg/WM7eEPDkc</a>"
+        )
     except Exception as e:
         logging.error(f"Ошибка отправки: {e}")
         await message.answer("❌ Ошибка отправки анкеты.")
