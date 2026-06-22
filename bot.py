@@ -16,7 +16,6 @@ BOT_TOKEN = "8772261504:AAGWKUwnsLR2bWXEZK9mL9PH9UA0NVz-keQ"
 GROUP_ID = -1004442464434
 # ==================
 
-# Настройка бота
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -27,7 +26,7 @@ class Form(StatesGroup):
     waiting_for_device = State()
     waiting_for_discord = State()
     waiting_for_roblox = State()
-    waiting_for_farm_amount = State() # Новый этап
+    waiting_for_farm = State()
     waiting_for_proof = State()
 
 # --- Клавиатуры ---
@@ -41,6 +40,7 @@ def get_moderation_keyboard(user_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Принять", callback_data=f"accept_{user_id}"),
          InlineKeyboardButton(text="❌ Отказать", callback_data=f"reject_{user_id}")],
+        [InlineKeyboardButton(text="⏳ Резерв", callback_data=f"reserve_{user_id}")],
         [InlineKeyboardButton(text="🚫 Забанить", callback_data=f"ban_{user_id}")]
     ])
 
@@ -54,10 +54,9 @@ async def start_command(message: Message, state: FSMContext):
         
     start_text = (
         "👋 <b>Добро пожаловать в клан!</b>\n\n"
-        "Чтобы подать заявку, ответьте на несколько вопросов:\n\n"
+        "Чтобы подать заявку, ответьте на вопросы:\n"
         "🥕 <b>Вопрос 1: Сколько сейчас моркови имеете?</b>"
     )
-    
     await message.answer(start_text)
     await state.set_state(Form.waiting_for_carrots)
 
@@ -75,8 +74,7 @@ async def process_device(message: Message, state: FSMContext):
 
 @dp.callback_query(Form.waiting_for_discord, F.data.in_({"yes", "no"}))
 async def process_discord(call: CallbackQuery, state: FSMContext):
-    answer_text = "Да ✅" if call.data == "yes" else "Нет ❌"
-    await state.update_data(discord=answer_text)
+    await state.update_data(discord="Да ✅" if call.data == "yes" else "Нет ❌")
     await call.message.edit_text("🕹️ <b>Вопрос 4: Напишите ваш ник в Роблокс</b>")
     await state.set_state(Form.waiting_for_roblox)
     await call.answer()
@@ -85,15 +83,14 @@ async def process_discord(call: CallbackQuery, state: FSMContext):
 async def process_roblox(message: Message, state: FSMContext):
     await state.update_data(roblox=message.text)
     await message.answer("📈 <b>Вопрос 5: Сколько в день вы фармите моркови?</b>")
-    await state.set_state(Form.waiting_for_farm_amount)
+    await state.set_state(Form.waiting_for_farm)
 
-@dp.message(Form.waiting_for_farm_amount)
+@dp.message(Form.waiting_for_farm)
 async def process_farm(message: Message, state: FSMContext):
     await state.update_data(farm=message.text)
-    
     proof_text = (
         "📸 <b>ФИНАЛЬНЫЙ ЭТАП: ПОДТВЕРЖДЕНИЕ</b>\n\n"
-        "1. Зайдите в игру и сделайте скрин, чтобы доказать, сколько у вас моркови.\n\n"
+        "Зайдите в игру и сделайте скриншот, чтобы доказать, сколько у вас моркови.\n\n"
         "👉 <b>Пришлите своё фото в ответ на это сообщение:</b>"
     )
     await message.answer(proof_text)
@@ -110,7 +107,7 @@ async def handle_proof(message: Message, state: FSMContext):
                f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n"
                f"🔗 <b>Юзер:</b> {username}\n"
                f"🥕 <b>Морковь (сейчас):</b> {data.get('carrots')}\n"
-               f"📈 <b>Морковь (фарм в день):</b> {data.get('farm')}\n"
+               f"📈 <b>Фарм в день:</b> {data.get('farm')}\n"
                f"📱 <b>Устройство:</b> {data.get('device')}\n"
                f"🎮 <b>Discord:</b> {data.get('discord')}\n"
                f"🕹️ <b>Roblox:</b> {data.get('roblox')}\n\n"
@@ -118,12 +115,7 @@ async def handle_proof(message: Message, state: FSMContext):
     
     try:
         await bot.send_photo(GROUP_ID, photo=file_id, caption=caption, reply_markup=get_moderation_keyboard(message.from_user.id))
-        await message.answer(
-            "✅ <b>Анкета успешно отправлена!</b>\nОжидай решения администрации.\n\n"
-            "🔗 <b>Наши паблики:</b>\n"
-            "Telegram: <a href='https://t.me/piskaguild'>https://t.me/piskaguild</a>\n"
-            "Discord: <a href='https://discord.gg/WM7eEPDkc'>https://discord.gg/WM7eEPDkc</a>"
-        )
+        await message.answer("✅ <b>Анкета успешно отправлена!</b>\nОжидай решения администрации.")
     except Exception as e:
         logging.error(f"Ошибка отправки: {e}")
         await message.answer("❌ Ошибка отправки анкеты.")
@@ -150,6 +142,25 @@ async def reject(call: CallbackQuery):
     try: await bot.send_message(uid, "❌ <b>Вы не приняты</b>")
     except: pass
     await call.answer()
+
+@dp.callback_query(F.data.startswith("reserve_"))
+async def reserve_user(call: CallbackQuery):
+    uid = int(call.data.split("_")[1])
+    await call.message.edit_caption(caption=call.message.caption + "\n\n⏳ <b>Статус: В резерве</b>", reply_markup=None)
+    
+    reserve_msg = (
+        "⭐️ <b>Твоя анкета пока в резерве</b>\n\n"
+        "Это не отказ. Сейчас мест в гильдии ограниченное количество, поэтому в основной состав сначала берём самых сильных и активных игроков.\n\n"
+        "Твоя заявка сохранена. Если освободится место или ты покажешь хороший прогресс, мы сможем пересмотреть анкету.\n\n"
+        "<b>Чтобы подняться выше в списке:</b>\n"
+        "🥕 скинь новый скрин с морковью позже;\n"
+        "📈 покажи хороший прирост за сутки;\n"
+        "⏰ будь активен и не пропадай.\n\n"
+        "<i>Если будет место — админ напишет тебе.</i>"
+    )
+    try: await bot.send_message(uid, reserve_msg)
+    except: pass
+    await call.answer("Пользователь добавлен в резерв")
 
 @dp.callback_query(F.data.startswith("ban_"))
 async def ban_user(call: CallbackQuery):
