@@ -1,8 +1,8 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, InputMediaPhoto
+from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
@@ -23,11 +23,11 @@ dp = Dispatcher(storage=MemoryStorage())
 banned_users = set()
 
 class Form(StatesGroup):
-    waiting_for_crops = State()           # Вопрос 1: Дорогие семена/плоды
-    waiting_for_inventory = State()       # Вопрос 2: Размер инвентаря
-    waiting_for_roblox = State()          # Вопрос 3: Ник в Roblox
-    waiting_for_discord = State()         # Вопрос 4: Наличие Discord
-    waiting_for_proof = State()           # Пруф (фото)
+    waiting_for_crops = State()
+    waiting_for_inventory = State()
+    waiting_for_roblox = State()
+    waiting_for_discord = State()
+    waiting_for_proof = State()
 
 # --- Клавиатуры ---
 def get_yes_no_keyboard():
@@ -57,7 +57,6 @@ async def start_command(message: Message, state: FSMContext):
         await message.answer("⛔️ Вы заблокированы.")
         return
         
-    # Очищаем данные пользователя при новом старте
     await state.clear()
     
     start_text = (
@@ -122,7 +121,6 @@ async def process_discord(call: CallbackQuery, state: FSMContext):
     answer_text = "✅ Да" if call.data == "yes" else "❌ Нет"
     await state.update_data(discord=answer_text)
     
-    # Инициализируем список для хранения фото
     await state.update_data(photos=[])
     await state.update_data(photo_count=0)
     
@@ -149,7 +147,6 @@ async def handle_proof_photo(message: Message, state: FSMContext):
     photos = data.get('photos', [])
     photo_count = data.get('photo_count', 0)
     
-    # Сохраняем file_id фото
     file_id = message.photo[-1].file_id
     photos.append(file_id)
     photo_count += 1
@@ -157,7 +154,6 @@ async def handle_proof_photo(message: Message, state: FSMContext):
     await state.update_data(photos=photos)
     await state.update_data(photo_count=photo_count)
     
-    # Показываем кнопку "Отправить все фото"
     keyboard = get_photo_done_keyboard()
     
     await message.answer(
@@ -177,7 +173,6 @@ async def send_all_photos(call: CallbackQuery, state: FSMContext):
         await call.answer("❌ Вы не отправили ни одного фото!", show_alert=True)
         return
     
-    # Отправляем все фото в группу модерации
     username = f"@{call.from_user.username}" if call.from_user.username else "❌ Нет"
     
     caption = (
@@ -196,47 +191,18 @@ async def send_all_photos(call: CallbackQuery, state: FSMContext):
     )
     
     try:
-        if len(photos) == 1:
-            # Если одно фото - отправляем как обычное
-            await bot.send_photo(
-                GROUP_ID, 
-                photo=photos[0], 
-                caption=caption, 
-                reply_markup=get_moderation_keyboard(call.from_user.id)
-            )
-        else:
-            # Если несколько фото - отправляем альбомом (медиа-группой)
-            media_group = []
-            
-            # Первое фото с подписью
-            media_group.append(
-                InputMediaPhoto(
-                    media=photos[0],
-                    caption=caption
-                )
-            )
-            
-            # Остальные фото без подписи
-            for photo_id in photos[1:]:
-                media_group.append(
-                    InputMediaPhoto(media=photo_id)
-                )
-            
-            # Отправляем альбом
-            await bot.send_media_group(
-                chat_id=GROUP_ID,
-                media=media_group
-            )
-            
-            # Отправляем кнопки модерации отдельным сообщением
-            await bot.send_message(
-                GROUP_ID,
-                "📋 <b>Анкета выше ☝️</b>\n\n"
-                "👇 Выберите действие:",
-                reply_markup=get_moderation_keyboard(call.from_user.id)
-            )
+        # ВАЖНО: Отправляем ПЕРВОЕ фото с КНОПКАМИ!
+        await bot.send_photo(
+            GROUP_ID, 
+            photo=photos[0], 
+            caption=caption, 
+            reply_markup=get_moderation_keyboard(call.from_user.id)  # ← КНОПКИ ТУТ!
+        )
         
-        # Уведомляем пользователя
+        # Отправляем остальные фото без кнопок
+        for photo_id in photos[1:]:
+            await bot.send_photo(GROUP_ID, photo=photo_id)
+        
         await call.message.edit_text(
             "✅ <b>Все фото успешно отправлены!</b>\n"
             "Анкета передана на рассмотрение.\n"
@@ -267,8 +233,9 @@ async def wrong_proof(message: Message):
 @dp.callback_query(F.data.startswith("accept_"))
 async def accept(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
-    await call.message.edit_text(
-        call.message.text + "\n\n✅ <b>Принято!</b>",
+    # Редактируем caption у фото
+    await call.message.edit_caption(
+        caption=call.message.caption + "\n\n✅ <b>Принято!</b>",
         reply_markup=None
     )
     try: 
@@ -278,25 +245,28 @@ async def accept(call: CallbackQuery):
             "👤 @k6ppy\n"
             "👤 @Forchlele"
         )
-    except: pass
+    except: 
+        pass
     await call.answer()
 
 @dp.callback_query(F.data.startswith("reject_"))
 async def reject(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
-    await call.message.edit_text(
-        call.message.text + "\n\n❌ <b>Отказано!</b>",
+    await call.message.edit_caption(
+        caption=call.message.caption + "\n\n❌ <b>Отказано!</b>",
         reply_markup=None
     )
-    try: await bot.send_message(uid, "❌ <b>К сожалению, вы не прошли отбор.</b>")
-    except: pass
+    try: 
+        await bot.send_message(uid, "❌ <b>К сожалению, вы не прошли отбор.</b>")
+    except: 
+        pass
     await call.answer()
 
 @dp.callback_query(F.data.startswith("reserve_"))
 async def reserve_user(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
-    await call.message.edit_text(
-        call.message.text + "\n\n⏳ <b>Статус: В резерве</b>",
+    await call.message.edit_caption(
+        caption=call.message.caption + "\n\n⏳ <b>Статус: В резерве</b>",
         reply_markup=None
     )
     reserve_msg = (
@@ -311,20 +281,24 @@ async def reserve_user(call: CallbackQuery):
         "⏰ будь активен и не пропадай\n\n"
         "<i>Если будет место — админ напишет тебе.</i>"
     )
-    try: await bot.send_message(uid, reserve_msg)
-    except: pass
+    try: 
+        await bot.send_message(uid, reserve_msg)
+    except: 
+        pass
     await call.answer("Пользователь в резерве")
 
 @dp.callback_query(F.data.startswith("ban_"))
 async def ban_user(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
     banned_users.add(uid)
-    await call.message.edit_text(
-        call.message.text + "\n\n🚫 <b>Пользователь забанен!</b>",
+    await call.message.edit_caption(
+        caption=call.message.caption + "\n\n🚫 <b>Пользователь забанен!</b>",
         reply_markup=None
     )
-    try: await bot.send_message(uid, "🚫 <b>Вы забанены в боте.</b>")
-    except: pass
+    try: 
+        await bot.send_message(uid, "🚫 <b>Вы забанены в боте.</b>")
+    except: 
+        pass
     await call.answer("Пользователь заблокирован!")
 
 async def main():
