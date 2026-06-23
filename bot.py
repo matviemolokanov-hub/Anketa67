@@ -2,12 +2,13 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, FSInputFile
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,8 +17,12 @@ BOT_TOKEN = "8772261504:AAGWKUwnsLR2bWXEZK9mL9PH9UA0NVz-keQ"
 GROUP_ID = -1004442464434
 # ==================
 
-# Настройка бота
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# Настройка бота с увеличенными таймаутами
+bot = Bot(
+    token=BOT_TOKEN, 
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    timeout=60  # Увеличиваем таймаут до 60 секунд
+)
 dp = Dispatcher(storage=MemoryStorage())
 
 banned_users = set()
@@ -147,6 +152,7 @@ async def handle_proof_photo(message: Message, state: FSMContext):
     photos = data.get('photos', [])
     photo_count = data.get('photo_count', 0)
     
+    # Получаем file_id
     file_id = message.photo[-1].file_id
     photos.append(file_id)
     photo_count += 1
@@ -166,6 +172,9 @@ async def handle_proof_photo(message: Message, state: FSMContext):
 
 @dp.callback_query(Form.waiting_for_proof, F.data == "photos_done")
 async def send_all_photos(call: CallbackQuery, state: FSMContext):
+    # Сразу отвечаем на callback, чтобы не было "висячего" состояния
+    await call.answer("⏳ Отправка анкеты...")
+    
     data = await state.get_data()
     photos = data.get('photos', [])
     
@@ -191,18 +200,10 @@ async def send_all_photos(call: CallbackQuery, state: FSMContext):
     )
     
     try:
-        # ВАЖНО: Отправляем ПЕРВОЕ фото с КНОПКАМИ!
-        await bot.send_photo(
-            GROUP_ID, 
-            photo=photos[0], 
-            caption=caption, 
-            reply_markup=get_moderation_keyboard(call.from_user.id)  # ← КНОПКИ ТУТ!
-        )
+        # Отправляем с увеличенным таймаутом и повторными попытками
+        await send_photos_with_retry(photos, caption, call.from_user.id)
         
-        # Отправляем остальные фото без кнопок
-        for photo_id in photos[1:]:
-            await bot.send_photo(GROUP_ID, photo=photo_id)
-        
+        # Уведомляем пользователя
         await call.message.edit_text(
             "✅ <b>Все фото успешно отправлены!</b>\n"
             "Анкета передана на рассмотрение.\n"
@@ -213,14 +214,53 @@ async def send_all_photos(call: CallbackQuery, state: FSMContext):
             "Discord: <a href='https://discord.gg/WM7eEPDkc'>https://discord.gg/WM7eEPDkc</a>"
         )
         
-        await call.answer("✅ Анкета отправлена!")
         await state.clear()
         
     except Exception as e:
         logging.error(f"Ошибка отправки: {e}")
         await call.message.answer("❌ Ошибка отправки анкеты. Попробуйте снова /start")
         await state.clear()
-        await call.answer()
+
+async def send_photos_with_retry(photos: list, caption: str, user_id: int, max_retries: int = 3):
+    """Отправляет фото с повторными попытками при ошибке"""
+    
+    for attempt in range(max_retries):
+        try:
+            # Отправляем первое фото с кнопками
+            await bot.send_photo(
+                GROUP_ID,
+                photo=photos[0],
+                caption=caption,
+                reply_markup=get_moderation_keyboard(user_id)
+            )
+            
+            # Отправляем остальные фото
+            for photo_id in photos[1:]:
+                await bot.send_photo(GROUP_ID, photo=photo_id)
+            
+            # Если всё успешно - выходим
+            return
+            
+        except TelegramRetryAfter as e:
+            # Если Telegram говорит "подожди"
+            wait_time = e.retry_after
+            logging.warning(f"Flood control, ждём {wait_time} секунд...")
+            await asyncio.sleep(wait_time)
+            
+        except TelegramNetworkError as e:
+            # Если сетевая ошибка - пробуем ещё
+            logging.warning(f"Сетевая ошибка, попытка {attempt + 1}/{max_retries}: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка: 1, 2, 4 сек
+            else:
+                raise
+                
+        except Exception as e:
+            logging.error(f"Ошибка при отправке: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1)
+            else:
+                raise
 
 @dp.message(Form.waiting_for_proof)
 async def wrong_proof(message: Message):
@@ -233,11 +273,16 @@ async def wrong_proof(message: Message):
 @dp.callback_query(F.data.startswith("accept_"))
 async def accept(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
-    # Редактируем caption у фото
-    await call.message.edit_caption(
-        caption=call.message.caption + "\n\n✅ <b>Принято!</b>",
-        reply_markup=None
-    )
+    await call.answer("✅ Принято!")
+    
+    try:
+        await call.message.edit_caption(
+            caption=call.message.caption + "\n\n✅ <b>Принято!</b>",
+            reply_markup=None
+        )
+    except:
+        pass
+        
     try: 
         await bot.send_message(uid, 
             "✅ <b>Поздравляем! Вы приняты в клан!</b>\n\n"
@@ -247,28 +292,38 @@ async def accept(call: CallbackQuery):
         )
     except: 
         pass
-    await call.answer()
 
 @dp.callback_query(F.data.startswith("reject_"))
 async def reject(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
-    await call.message.edit_caption(
-        caption=call.message.caption + "\n\n❌ <b>Отказано!</b>",
-        reply_markup=None
-    )
+    await call.answer("❌ Отказано!")
+    
+    try:
+        await call.message.edit_caption(
+            caption=call.message.caption + "\n\n❌ <b>Отказано!</b>",
+            reply_markup=None
+        )
+    except:
+        pass
+        
     try: 
         await bot.send_message(uid, "❌ <b>К сожалению, вы не прошли отбор.</b>")
     except: 
         pass
-    await call.answer()
 
 @dp.callback_query(F.data.startswith("reserve_"))
 async def reserve_user(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
-    await call.message.edit_caption(
-        caption=call.message.caption + "\n\n⏳ <b>Статус: В резерве</b>",
-        reply_markup=None
-    )
+    await call.answer("⏳ В резерве!")
+    
+    try:
+        await call.message.edit_caption(
+            caption=call.message.caption + "\n\n⏳ <b>Статус: В резерве</b>",
+            reply_markup=None
+        )
+    except:
+        pass
+        
     reserve_msg = (
         "⭐️ <b>Твоя анкета пока в резерве</b>\n\n"
         "Это не отказ. Сейчас мест в гильдии ограниченное количество, поэтому в основной состав сначала берём самых сильных и активных игроков.\n\n"
@@ -285,21 +340,26 @@ async def reserve_user(call: CallbackQuery):
         await bot.send_message(uid, reserve_msg)
     except: 
         pass
-    await call.answer("Пользователь в резерве")
 
 @dp.callback_query(F.data.startswith("ban_"))
 async def ban_user(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
+    await call.answer("🚫 Забанен!")
+    
     banned_users.add(uid)
-    await call.message.edit_caption(
-        caption=call.message.caption + "\n\n🚫 <b>Пользователь забанен!</b>",
-        reply_markup=None
-    )
+    
+    try:
+        await call.message.edit_caption(
+            caption=call.message.caption + "\n\n🚫 <b>Пользователь забанен!</b>",
+            reply_markup=None
+        )
+    except:
+        pass
+        
     try: 
         await bot.send_message(uid, "🚫 <b>Вы забанены в боте.</b>")
     except: 
         pass
-    await call.answer("Пользователь заблокирован!")
 
 async def main():
     print("🚀 Бот запущен!")
