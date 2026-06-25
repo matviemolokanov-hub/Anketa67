@@ -12,7 +12,7 @@ from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== ДАННЫЕ =====
+# ===== ДАННЫЕ ====
 BOT_TOKEN = "8772261504:AAGWKUwnsLR2bWXEZK9mL9PH9UA0NVz-keQ"
 GROUP_ID = -1004442464434
 # ==================
